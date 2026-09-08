@@ -49,9 +49,9 @@ const ChevronDown = () => (
 );
 
 const FolderIcon = ({ open }: { open: boolean }) => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style={{ flexShrink: 0 }}>
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style={{ flexShrink: 0, color: 'var(--color-folder)' }}>
     {open ? (
-      <path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h3.586a1 1 0 0 1 .707.293L8.5 4H13.5A1.5 1.5 0 0 1 15 5.5v1.086a2.5 2.5 0 0 0-.5-.086H2a2 2 0 0 0-2 2V12a1.5 1.5 0 0 1-1.5-1.5v-7z" />
+      <path d="M1 4a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.4.57L9 4h4a2 2 0 0 1 2 2v1H3.2a2 2 0 0 0-1.94 1.51L1 9.54V4Zm2.2 4H15a1 1 0 0 1 .97 1.24l-1 4A1 1 0 0 1 14 14H2a1 1 0 0 1-.97-1.24l1.2-4A1 1 0 0 1 3.2 8Z" />
     ) : (
       <path d="M.54 3.87L.5 3a2 2 0 0 1 2-2h3.19a2 2 0 0 1 1.45.63l.41.44H14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V5.07a2.5 2.5 0 0 0 .54-1.2z" />
     )}

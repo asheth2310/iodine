@@ -67,6 +67,7 @@ The client runs at `http://localhost:5173`; the server runs at `http://localhost
 ### Useful commands
 
 ```bash
+npm test
 npm run build
 npm run typecheck
 ```
@@ -149,8 +150,9 @@ For endpoint payloads and implementation details, inspect the route module and i
 
 Before opening a pull request:
 
-1. Run `npm run typecheck`.
-2. Run `npm run build`.
-3. Explain user-facing behavior and any changes to AI prompts or tool permissions.
-4. Include screenshots or a short recording for meaningful UI changes.
-5. Keep documentation in sync with the implementation.
+1. Run `npm test`.
+2. Run `npm run typecheck`.
+3. Run `npm run build`.
+4. Explain user-facing behavior and any changes to AI prompts or tool permissions.
+5. Include screenshots or a short recording for meaningful UI changes.
+6. Keep documentation in sync with the implementation.

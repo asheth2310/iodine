@@ -137,9 +137,9 @@ export async function runGeminiAgentLoop(
     for (const fc of functionCalls) {
       if (abortSignal.aborted) return;
 
-      writeSSE(res, 'tool_call', { id: fc.id, name: fc.name, input: fc.args });
+      writeSSE(res, 'tool_call', { id: fc.id, name: fc.name, input: fc.args, approval_id: fc.name === 'run_terminal_command' ? fc.id : undefined });
 
-      const result = await executeAgentTool(fc.name, fc.args, res, abortSignal);
+      const result = await executeAgentTool(fc.name, fc.args, res, abortSignal, fc.id);
       writeSSE(res, 'tool_result', {
         tool_use_id: fc.id,
         name: fc.name,

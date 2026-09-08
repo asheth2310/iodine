@@ -16,6 +16,12 @@ export const GREETING_PHRASES: Record<'hello' | 'welcomeBack', string[]> = {
   ],
 };
 
+export const QUESTION_BRIDGE_PHRASES = [
+  'Good question...',
+  'That’s a good question...',
+  'Good question. Let’s take a look...',
+];
+
 export const TOOL_NARRATION_PHRASES: Record<string, string[]> = {
   read_file: [
     'Let me read through {file}.', 'I’ll take a closer look at {file}.', 'Let me inspect {file}.',
@@ -48,18 +54,18 @@ export const TOOL_NARRATION_PHRASES: Record<string, string[]> = {
     'Let me write {file} from scratch.', 'I’ll get {file} started.', 'Let me assemble {file}.',
     'I’m adding {file} to the project.', 'Let me prepare {file}.', 'I’ll create the initial {file}.',
     'Let me lay out {file}.', 'I’m writing the new {file}.', 'Let me get {file} into place.',
-    'I’ll add the implementation in {file}.', 'Let me form the new {file}.',
+    'I’ll add the implementation in {file}.', 'Let me create the new {file}.',
     'I’m setting up the structure for {file}.',
   ],
   open_file: [
     'Let me open {file}.', 'I’ll bring up {file}.', 'Let me jump to {file}.',
     'I’m opening {file} in the editor.', 'Let me navigate to {file}.', 'I’ll pull up {file}.',
     'Let me show you {file}.', 'I’m heading over to {file}.', 'Let me focus the editor on {file}.',
-    'I’ll take us to {file}.', 'Let me highlight the relevant part of {file}.',
+    'I’ll open {file}.', 'Let me highlight the relevant part of {file}.',
     'I’m bringing {file} into view.', 'Let me point you to {file}.', 'I’ll open the right section of {file}.',
     'Let me surface {file} in the editor.', 'I’m navigating to the code in {file}.',
     'Let me put {file} on screen.', 'I’ll show the relevant lines in {file}.',
-    'Let me bring the important section of {file} into view.', 'I’m opening up {file} for us.',
+    'Let me show you the relevant part of {file}.', 'I’m opening up {file} for us.',
   ],
   list_directory: [
     'Let me look around in {file}.', 'I’ll check the structure of {file}.', 'Let me see what’s inside {file}.',
@@ -69,19 +75,13 @@ export const TOOL_NARRATION_PHRASES: Record<string, string[]> = {
     'Let me see how this directory is arranged.', 'I’m reviewing the project structure here.',
     'Let me check what files are available.', 'I’ll explore this part of the workspace.',
     'Let me get a quick overview of {file}.', 'I’m looking through the directory tree.',
-    'Let me find our way around {file}.', 'I’ll inspect the folders in {file}.',
+    'Let me look through {file}.', 'I’ll inspect the folders in {file}.',
     'Let me see what we have to work with here.', 'I’m taking stock of the files in {file}.',
   ],
   search_files: [
-    'Let me search for that.', 'I’ll track that down.', 'Let me find where this is defined.',
-    'I’m looking for the relevant code.', 'Let me locate that in the project.', 'I’ll search the codebase for it.',
-    'Let me see where that appears.', 'I’m tracing down the matching references.',
-    'Let me find the right implementation.', 'I’ll look for every place this is used.',
-    'Let me narrow down where this lives.', 'I’m searching for the related code now.',
-    'Let me identify the files involved.', 'I’ll find the source of that behavior.',
-    'Let me follow that name through the codebase.', 'I’m checking where this is referenced.',
-    'Let me hunt down the relevant section.', 'I’ll search for the closest match.',
-    'Let me find the code path behind this.', 'I’m locating the right place to make the change.',
+    'Searching for the relevant code.', 'Checking the matching references.',
+    'Checking this in the codebase.', 'Locating the implementation.',
+    'Checking where this is used.', 'Finding the code path.',
   ],
   git_commit_compose: [
     'Let me draft a commit message.', 'I’ll prepare a commit message for you.',

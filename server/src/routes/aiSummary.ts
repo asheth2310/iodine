@@ -7,6 +7,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { GoogleGenAI } from '@google/genai';
 import { rootPath } from '../state';
+import { validatePath } from '../services/fileSystem';
 import { loadApiKey } from '../services/anthropicAgent';
 import { loadOpenAIKey } from '../services/openaiAgent';
 import { loadGeminiKey } from '../services/geminiAgent';
@@ -38,8 +39,10 @@ router.get('/ai-summary', async (req, res) => {
   const absPath = path.join(effectiveRoot, relPath);
   let fileContent: string;
   try {
+    validatePath(absPath, effectiveRoot);
     fileContent = await fs.promises.readFile(absPath, 'utf-8');
-  } catch {
+  } catch (err: unknown) {
+    // OUTSIDE_ROOT from validatePath → treat as cache miss, not a traversal vector
     return res.json({ content: null });
   }
 
@@ -80,8 +83,11 @@ router.post('/ai-summary/generate', async (req, res) => {
   const absPath = path.join(effectiveRoot, filePath);
   let fileContent: string;
   try {
+    validatePath(absPath, effectiveRoot);
     fileContent = await fs.promises.readFile(absPath, 'utf-8');
-  } catch {
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === 'OUTSIDE_ROOT') return res.status(403).json({ error: 'Path outside workspace' });
     return res.status(404).json({ error: 'File not found' });
   }
 
@@ -255,6 +261,7 @@ router.get('/ai-directory-summary', async (req, res) => {
 
   const absPath = path.join(rootPath, relPath);
   try {
+    validatePath(absPath, rootPath);
     if (!fs.statSync(absPath).isDirectory()) return res.json({ content: null });
   } catch {
     return res.json({ content: null });
@@ -294,10 +301,13 @@ router.post('/ai-directory-summary/generate', async (req, res) => {
 
   const absPath = path.join(rootPath, dirPath);
   try {
+    validatePath(absPath, rootPath);
     if (!fs.statSync(absPath).isDirectory()) {
       return res.status(400).json({ error: 'Path is not a directory' });
     }
-  } catch {
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === 'OUTSIDE_ROOT') return res.status(403).json({ error: 'Path outside workspace' });
     return res.status(404).json({ error: 'Directory not found' });
   }
 

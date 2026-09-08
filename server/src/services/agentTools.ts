@@ -10,6 +10,7 @@ export async function executeAgentTool(
   input: Record<string, unknown>,
   res: Response,
   abortSignal: { aborted: boolean },
+  toolCallId?: string,
 ) {
   if (name === 'open_file') {
     let filePath = typeof input.path === 'string' ? input.path.trim() : '';
@@ -66,7 +67,7 @@ export async function executeAgentTool(
     };
   }
 
-  if (name !== 'run_terminal_command') return executeTool(name, input);
+  if (name !== 'run_terminal_command') return executeTool(name, input, toolCallId);
 
   const command = typeof input.command === 'string' ? input.command.trim() : '';
   const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
@@ -80,7 +81,7 @@ export async function executeAgentTool(
     };
   }
 
-  const id = randomUUID();
+  const id = toolCallId ?? randomUUID();
   const approved = await requestTerminalApproval({ id, command, reason, longRunning }, res, abortSignal);
   if (!approved) {
     return {

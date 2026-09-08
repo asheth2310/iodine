@@ -77,7 +77,7 @@ function parseDiff(diffOutput: string): DiffResult {
       if (originalLines.length === 0) {
         hunks.push({ startLine: plusLineNos[0], lineCount: plusLineNos.length, originalLines: [], type: 'added' });
       } else if (plusLineNos.length === 0) {
-        hunks.push({ startLine: newLine - 1, lineCount: 0, originalLines, type: 'deleted' });
+        hunks.push({ startLine: Math.max(0, newLine - 1), lineCount: 0, originalLines, type: 'deleted' });
       } else {
         hunks.push({ startLine: plusLineNos[0], lineCount: plusLineNos.length, originalLines, type: 'modified' });
       }
@@ -422,7 +422,10 @@ router.get('/files/image', async (req, res) => {
 
   // Resolve and guard against path traversal
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(rootPath + path.sep) && resolved !== rootPath) {
+  // Resolve symlinks so a symlink inside workspace pointing outside is caught
+  const realResolved = fs.realpathSync(resolved);
+  const realRoot = fs.realpathSync(rootPath);
+  if (!realResolved.startsWith(realRoot + path.sep) && realResolved !== realRoot) {
     return res.status(400).json({ error: 'Path outside workspace' });
   }
 
@@ -457,7 +460,10 @@ router.get('/files/pdf', async (req, res) => {
 
   // Resolve and guard against path traversal
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(rootPath + path.sep) && resolved !== rootPath) {
+  // Resolve symlinks so a symlink inside workspace pointing outside is caught
+  const realResolved = fs.realpathSync(resolved);
+  const realRoot = fs.realpathSync(rootPath);
+  if (!realResolved.startsWith(realRoot + path.sep) && realResolved !== realRoot) {
     return res.status(400).json({ error: 'Path outside workspace' });
   }
 
@@ -565,8 +571,14 @@ router.get('/git/status', async (_req, res) => {
       if (filePath.includes(' -> ')) filePath = filePath.split(' -> ')[1];
 
       const absPath = path.join(repoRoot, filePath);
-      const isStaged   = X !== ' ' && X !== '?';
-      const isUnstaged = Y !== ' ' && Y !== '?';
+      // Untracked files/dirs ("??") are working-copy changes too — mark them
+      // 'unstaged' so the file explorer highlights them like the SCM panel does.
+      if (X === '?' && Y === '?') {
+        status[absPath] = 'unstaged';
+        continue;
+      }
+      const isStaged   = X !== ' ';
+      const isUnstaged = Y !== ' ';
 
       if (isStaged && isUnstaged) status[absPath] = 'both';
       else if (isStaged)          status[absPath] = 'staged';
@@ -666,14 +678,16 @@ router.post('/git/discard', async (req, res) => {
   const { relPath, isUntracked } = req.body as { relPath?: string; isUntracked?: boolean };
   if (!relPath) return res.status(400).json({ error: 'relPath is required' });
   try {
-    const repoRoot = await resolveRepoRoot(rootPath);
-    const absPath = path.resolve(path.join(repoRoot, relPath));
+    // path.resolve normalizes git's forward slashes to native separators (Windows)
+    const repoRoot = path.resolve(await resolveRepoRoot(rootPath));
+    const absPath = path.resolve(repoRoot, relPath);
     // Guard against path traversal
     if (!absPath.startsWith(repoRoot + path.sep) && absPath !== repoRoot) {
       return res.status(400).json({ error: 'Path outside repository' });
     }
     if (isUntracked) {
-      await fs.promises.unlink(absPath);
+      // Untracked entries can be whole directories ("?? dir/") — rm handles both files and dirs
+      await fs.promises.rm(absPath, { recursive: true, force: true });
     } else {
       await execFileAsync('git', ['restore', '--', absPath], { cwd: rootPath });
     }

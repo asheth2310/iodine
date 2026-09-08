@@ -9,15 +9,25 @@ export function extractBranchNames(content: string): { ours: string; theirs: str
   };
 }
 
+/**
+ * States for the conflict-marker state machine. 'base' is the diff3 merge-base
+ * section between `<<<<<<<` and `=======` (introduced by `merge.conflictStyle=diff3`).
+ * Lines in this section belong to neither side and must be skipped for both
+ * the "ours" and "theirs" resolved versions.
+ */
+type ConflictState = 'normal' | 'ours' | 'theirs' | 'base';
+
 /** Full file with every conflict resolved by taking the ours side. */
 export function buildOursVersion(content: string): string {
   const out: string[] = [];
-  let state: 'normal' | 'ours' | 'theirs' = 'normal';
+  let state: ConflictState = 'normal';
   for (const line of content.split('\n')) {
     if (line.startsWith('<<<<<<<')) { state = 'ours';   continue; }
+    if (line.startsWith('|||||||')) { state = 'base';   continue; }
     if (line.startsWith('=======')) { state = 'theirs'; continue; }
     if (line.startsWith('>>>>>>>')) { state = 'normal'; continue; }
-    if (state !== 'theirs') out.push(line);
+    if (state === 'base' || state === 'theirs') continue;
+    out.push(line);
   }
   return out.join('\n');
 }
@@ -25,12 +35,14 @@ export function buildOursVersion(content: string): string {
 /** Full file with every conflict resolved by taking the theirs side. */
 export function buildTheirsVersion(content: string): string {
   const out: string[] = [];
-  let state: 'normal' | 'ours' | 'theirs' = 'normal';
+  let state: ConflictState = 'normal';
   for (const line of content.split('\n')) {
     if (line.startsWith('<<<<<<<')) { state = 'ours';   continue; }
+    if (line.startsWith('|||||||')) { state = 'base';   continue; }
     if (line.startsWith('=======')) { state = 'theirs'; continue; }
     if (line.startsWith('>>>>>>>')) { state = 'normal'; continue; }
-    if (state !== 'ours') out.push(line);
+    if (state === 'base' || state === 'ours') continue;
+    out.push(line);
   }
   return out.join('\n');
 }

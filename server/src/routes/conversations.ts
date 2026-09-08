@@ -17,6 +17,7 @@ interface ConversationRouterOptions {
 }
 
 const MAX_ID_LENGTH = 128;
+const MAX_CONVERSATIONS_SHOWN = 6;
 const MAX_MESSAGES = 10_000;
 const MAX_CONTENT_LENGTH = 1_000_000;
 const ID_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -123,7 +124,7 @@ export function createConversationsRouter(options: ConversationRouterOptions = {
         }
       }
       records.sort((a, b) => b.timestamp - a.timestamp);
-      return res.json(records.slice(0, 3));
+      return res.json(records.slice(0, MAX_CONVERSATIONS_SHOWN));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return res.json([]);
       return res.status(500).json({ error: errorMessage(error) });

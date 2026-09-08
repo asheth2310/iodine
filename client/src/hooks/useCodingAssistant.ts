@@ -3,6 +3,7 @@ import { UIMessage, UIBlock, HistoryMessage } from '../types';
 import type { Provider } from '../providers';
 import { fetchOverallDiff } from '../api/files';
 import { saveConversation, clearConversations, type ConversationRecord } from '../api/conversations';
+import { createEventContextQueue, formatEventContext, type EventContext } from '../utils/eventContextQueue';
 
 function uid() {
   return typeof crypto.randomUUID === 'function'
@@ -44,7 +45,7 @@ export function useCodingAssistant(
   onNavigateToLine?: (filePath: string, line: number, endLine?: number, startCol?: number, endCol?: number) => void,
   onWatchTrigger?: () => void,
   onAssistantReply?: (text: string, hadToolUse: boolean) => void,
-  onToolNarration?: (name: string, input: Record<string, unknown>) => void,
+  onToolNarration?: (name: string, input: Record<string, unknown>, approvalId?: string) => void,
   onFileTreeRefresh?: () => void,
   onSummaryRequest?: (filePath: string) => void,
 ) {
@@ -105,6 +106,7 @@ export function useCodingAssistant(
   const pendingSaveRef = useRef<PendingConversationSave | null>(null);
   const failedSaveRef = useRef<PendingConversationSave | null>(null);
   const pendingProactiveContextRef = useRef<(() => Promise<string>) | null>(null);
+  const eventContextQueueRef = useRef(createEventContextQueue());
   const armedReplyRef = useRef<string | null>(null);
 
   // Keep workspacePath current without adding it to sendMessage's dependency array.
@@ -208,8 +210,22 @@ export function useCodingAssistant(
     }
   }, []);
 
-  const stopExecution = useCallback(() => {
-    abortControllerRef.current?.abort();
+  const stopExecution = useCallback((source: 'stop_button' | 'microphone' = 'stop_button') => {
+    const controller = abortControllerRef.current;
+    if (!controller || controller.signal.aborted) return;
+
+    eventContextQueueRef.current.enqueue({
+      id: uid(),
+      type: 'user_interrupted',
+      source,
+      timestamp: Date.now(),
+      summary: source === 'microphone'
+        ? 'The user interrupted the previous response using the microphone.'
+        : 'The user stopped the previous response.',
+      state: 'paused',
+      guidance: 'IMPORTANT: You MUST acknowledge the interruption when natural—for example, that the user may want to change direction, refine the request, or ask something before continuing. Do not use a canned acknowledgment or assume why they interrupted. Address the new message directly. Resume, adapt, or abandon the prior task when their intent is clear; clarify only when ambiguous, but do acknowledge at all times.',
+    });
+    controller.abort();
   }, []);
 
   useEffect(() => () => {
@@ -416,9 +432,15 @@ export function useCodingAssistant(
 
     if (sendGeneration !== sessionGenerationRef.current) return;
 
+    const pendingEvents = eventContextQueueRef.current.snapshot();
+    const eventContext = formatEventContext(pendingEvents);
+
     let apiContent = text;
+    if (eventContext) {
+      apiContent = `${eventContext}\n\n---\n${apiContent}`;
+    }
     if (proactiveContext) {
-      apiContent = `**Context at the time of the assistant's proactive message (for reference only — respond conversationally, do not call any tools):**\n${proactiveContext}\n\n---\n${text}`;
+      apiContent = `**Context at the time of the assistant's proactive message (for reference only — respond conversationally, do not call any tools):**\n${proactiveContext}\n\n---\n${apiContent}`;
     }
     if (contextPaths && contextPaths.length > 0) {
       apiContent += `\n\n---\n**Relevant paths hint** (check these paths first when looking for relevant code):\n${contextPaths.map(p => `- \`${p}\``).join('\n')}`;
@@ -469,6 +491,8 @@ export function useCodingAssistant(
       if (!response.ok || !response.body) {
         throw new Error(`HTTP ${response.status}`);
       }
+
+      eventContextQueueRef.current.consume(pendingEvents.map(event => event.id));
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -578,7 +602,7 @@ export function useCodingAssistant(
             flushNow();
             toolUsedInTurnRef.current = true;
             if (tutorMode) {
-              onToolNarrationRef.current?.(payload.name as string, payload.input as Record<string, unknown>);
+              onToolNarrationRef.current?.(payload.name as string, payload.input as Record<string, unknown>, payload.approval_id as string | undefined);
             }
             const toolBlock: UIBlock = {
               type: 'tool',
@@ -748,6 +772,10 @@ export function useCodingAssistant(
     }
   }, []);
 
+  const enqueueEventContext = useCallback((event: EventContext) => {
+    eventContextQueueRef.current.enqueue(event);
+  }, []);
+
   return {
     uiMessages,
     isLoading,
@@ -756,6 +784,7 @@ export function useCodingAssistant(
     canRetryConversationSave,
     conversationSaveRevision,
     sendMessage,
+    enqueueEventContext,
     stopExecution,
     clearMessages,
     sendApproval,

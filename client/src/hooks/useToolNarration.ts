@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react';
-import { GREETING_PHRASES, TOOL_NARRATION_PHRASES } from '../prompts/toolNarration';
+import { GREETING_PHRASES, QUESTION_BRIDGE_PHRASES, TOOL_NARRATION_PHRASES } from '../prompts/toolNarration';
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:3001' : '';
 
@@ -7,11 +7,65 @@ const API_BASE = import.meta.env.DEV ? 'http://localhost:3001' : '';
 // Edit/write narrations are kept because they announce meaningful changes.
 const SKIPPABLE_TOOLS = new Set(['read_file', 'open_file', 'list_directory', 'search_files']);
 const MAX_TOOL_NARRATIONS_PER_TURN = 4;
+const NON_CODE_EXTENSIONS = new Set([
+  'md', 'mdx', 'rst', 'adoc', 'txt', 'log',
+  'html', 'htm', 'svg',
+  'json', 'yaml', 'yml', 'xml', 'toml', 'ini', 'conf', 'csv', 'tsv', 'lock',
+]);
+const IMPLEMENTATION_PHRASE = /\b(?:code|implementation|logic)\b/i;
 
 interface NarrationEntry {
   fn: () => Promise<string>;
   skippable: boolean;
+  approvalId?: string;
 }
+
+export const toolNarrationInternals = {
+  skippableTools: SKIPPABLE_TOOLS,
+  getFileParts(path?: string) {
+    const filename = path?.split(/[/\\]/).filter(Boolean).pop() ?? null;
+    const extension = filename?.match(/\.([^.]+)$/)?.[1].toLowerCase() ?? null;
+    const displayName = filename?.replace(/\.[^.]+$/, '') ?? null;
+    return { filename, extension, displayName };
+  },
+  getFileType(extension: string | null) {
+    const names: Record<string, string> = {
+      java: 'Java', sh: 'Script', cc: 'C plus plus', cpp: 'C plus plus', c: 'C', h: 'Header',
+      ts: 'TypeScript', tsx: 'TypeScript', kt: 'Kotlin', js: 'JavaScript', jsx: 'JavaScript',
+      py: 'Python', json: 'JSON', md: 'Markdown', css: 'CSS', html: 'HTML', yml: 'YAML', yaml: 'YAML',
+    };
+    return extension ? names[extension] ?? extension.toUpperCase() : null;
+  },
+  describeFile(path: string | undefined, narrationIndex: number) {
+    const { displayName, extension } = this.getFileParts(path);
+    const fileType = this.getFileType(extension);
+    return fileType && narrationIndex % 2 === 1
+      ? `${displayName ?? 'this'} ${fileType} file`
+      : `${displayName ?? 'this'} file`;
+  },
+  describeTarget(name: string, path: string | undefined, narrationIndex: number) {
+    if (name === 'list_directory') {
+      const directoryName = path?.split(/[/\\]/).filter(Boolean).pop() ?? 'this';
+      return `${directoryName} directory`;
+    }
+    return this.describeFile(path, narrationIndex);
+  },
+  getFamily(name: string) {
+    return name === 'open_file' || name === 'read_file' ? 'read' : name;
+  },
+  formatPhrase(template: string, fileDescription: string, continuesRead: boolean) {
+    return continuesRead ? `And ${fileDescription}.` : template.replace('{file}', fileDescription);
+  },
+  getPhrases(name: string, extension: string | null) {
+    const phrases = TOOL_NARRATION_PHRASES[name] ?? ['I can handle this.'];
+    return extension && NON_CODE_EXTENSIONS.has(extension)
+      ? phrases.filter(phrase => !IMPLEMENTATION_PHRASE.test(phrase))
+      : phrases;
+  },
+  isBridgeQuestion(text: string) {
+    return text.includes('?') && /\b(?:how does|why is|when should|when can|what if|where is)\b/i.test(text);
+  },
+};
 
 export function useToolNarration(speechProviderId: 'google' | 'openai') {
   const queueRef      = useRef<NarrationEntry[]>([]);
@@ -28,16 +82,21 @@ export function useToolNarration(speechProviderId: 'google' | 'openai') {
   const toolNarrationCountRef = useRef(0);
   // Cycles repeat wording predictably instead of choosing it at random.
   const repeatVariationRef = useRef(0);
+  // Alternates file narrations between a natural filename and filename + file type.
+  const fileNarrationCountRef = useRef(0);
   // Tracks accepted tool calls so adjacent reads can continue with “And <file>.”
   const previousFamilyRef = useRef<string | null>(null);
   const hadNarrationsRef   = useRef(false);
   const hadUnskippableRef  = useRef(false);
   const unskippableCountRef = useRef(0);
   const onEmptyRef         = useRef<(() => void) | null>(null);
+  const pendingBridgeRef   = useRef(false);
+  const spokenApprovalIdsRef = useRef(new Set<string>());
 
   const stop = useCallback(() => {
     generationRef.current++;
     queueRef.current = [];
+    pendingBridgeRef.current = false;
     audioRef.current?.pause();
     audioRef.current = null;
     drainingRef.current = false;
@@ -50,15 +109,16 @@ export function useToolNarration(speechProviderId: 'google' | 'openai') {
     drainingRef.current = true;
     const generation = generationRef.current;
     while (queueRef.current.length && generation === generationRef.current) {
-      const { fn: fetchAudio } = queueRef.current.shift()!;
+      const { fn: fetchAudio, approvalId } = queueRef.current.shift()!;
       try {
         const url = await fetchAudio();
         if (generation !== generationRef.current) { URL.revokeObjectURL(url); break; }
+        if (approvalId) spokenApprovalIdsRef.current.add(approvalId);
         await new Promise<void>(resolve => {
           const audio = new Audio(url);
           audioRef.current = audio;
           let finished = false;
-          const finish = () => { if (finished) return; finished = true; URL.revokeObjectURL(url); resolve(); };
+          const finish = () => { if (finished) return; finished = true; URL.revokeObjectURL(url); audioRef.current = null; resolve(); };
           audio.play().catch(finish);
           audio.addEventListener('ended', finish, { once: true });
           audio.addEventListener('error', finish, { once: true });
@@ -78,7 +138,28 @@ export function useToolNarration(speechProviderId: 'google' | 'openai') {
     queueRef.current = queueRef.current.filter(e => !e.skippable);
   }, []);
 
-  const narrate = useCallback((name: string, input: Record<string, unknown>) => {
+  /** Remove pending approval narration and briefly acknowledge an approval that was already spoken. */
+  const resolveApprovalNarration = useCallback((approvalId: string, approved: boolean) => {
+    queueRef.current = queueRef.current.filter(entry => entry.approvalId !== approvalId);
+    const wasSpoken = spokenApprovalIdsRef.current.delete(approvalId);
+    if (!approved || !wasSpoken || drainingRef.current || audioRef.current) return;
+
+    queueRef.current.push({
+      skippable: true,
+      fn: async () => {
+        const response = await fetch(`${API_BASE}/api/tts/speak`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: 'Thanks.', provider: speechProviderId }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return URL.createObjectURL(await response.blob());
+      },
+    });
+    void drain();
+  }, [speechProviderId, drain]);
+
+  const narrate = useCallback((name: string, input: Record<string, unknown>, approvalId?: string) => {
     if (toolNarrationCountRef.current >= MAX_TOOL_NARRATIONS_PER_TURN) return;
 
     const path = Object.values(input).find(
@@ -93,6 +174,24 @@ export function useToolNarration(speechProviderId: 'google' | 'openai') {
     // A duplicate in the current turn is silent. Only the first read/open key repeated
     // from an earlier turn gets repeat wording; other tools are narrated normally.
     if (narratedRef.current.has(key)) return;
+
+    if (pendingBridgeRef.current) {
+      pendingBridgeRef.current = false;
+      const text = QUESTION_BRIDGE_PHRASES[Math.floor(Math.random() * QUESTION_BRIDGE_PHRASES.length)];
+      queueRef.current.push({
+        skippable: false,
+        fn: async () => {
+          const response = await fetch(`${API_BASE}/api/tts/speak`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, provider: speechProviderId }),
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return URL.createObjectURL(await response.blob());
+        },
+      });
+    }
+
     // This cap counts accepted narration requests, including clips that later fail
     // during TTS/audio playback or are removed as skippable before they play.
     toolNarrationCountRef.current++;
@@ -116,10 +215,39 @@ export function useToolNarration(speechProviderId: 'google' | 'openai') {
     // so repeated "let me edit…" clips don't pile up and feel robotic.
     const skippable = SKIPPABLE_TOOLS.has(name) || unskippableCountRef.current > 2;
 
-    const phrases = TOOL_NARRATION_PHRASES[name] ?? ['I can handle this.'];
-    const template = phrases[Math.floor(Math.random() * phrases.length)];
     const filename = path?.split(/[/\\]/).filter(Boolean).pop() ?? null;
-    const basePhrase = continuesRead ? `And ${filename ?? 'this'}.` : template.replace('{file}', filename ?? 'this');
+    const extension = filename?.match(/\.([^.]+)$/)?.[1].toLowerCase() ?? null;
+    const displayName = filename?.replace(/\.[^.]+$/, '') ?? null;
+    const phrases = toolNarrationInternals.getPhrases(name, extension);
+    const template = phrases[Math.floor(Math.random() * phrases.length)];
+    const fileTypeNames: Record<string, string> = {
+      java: 'Java',
+      sh: 'Script',
+      cc: 'C plus plus',
+      cpp: 'C plus plus',
+      c: 'C',
+      h: 'Header',
+      ts: 'TypeScript',
+      tsx: 'TypeScript',
+      kt: 'Kotlin',
+      js: 'JavaScript',
+      jsx: 'JavaScript',
+      py: 'Python',
+      json: 'JSON',
+      md: 'Markdown',
+      css: 'CSS',
+      html: 'HTML',
+      yml: 'YAML',
+      yaml: 'YAML',
+    };
+    const fileType = extension ? fileTypeNames[extension] ?? extension.toUpperCase() : null;
+    const includeFileType = Boolean(fileType) && fileNarrationCountRef.current++ % 2 === 1;
+    const fileDescription = name === 'list_directory'
+      ? `${filename ?? 'this'} directory`
+      : fileType && includeFileType
+        ? `${displayName ?? 'this'} ${fileType} file`
+        : `${displayName ?? 'this'} file`;
+    const basePhrase = continuesRead ? `And ${fileDescription}.` : template.replace('{file}', fileDescription);
     const repeatVariations = ['again', 'once more', 'more closely'] as const;
     const repeatVariation = repeatVariations[repeatVariationRef.current % repeatVariations.length];
     if (shouldUseRepeatWording) repeatVariationRef.current++;
@@ -139,6 +267,7 @@ export function useToolNarration(speechProviderId: 'google' | 'openai') {
         return URL.createObjectURL(await response.blob());
       },
       skippable,
+      approvalId,
     });
     void drain();
   }, [speechProviderId, drain]);
@@ -162,15 +291,21 @@ export function useToolNarration(speechProviderId: 'google' | 'openai') {
     void drain();
   }, [speechProviderId, drain]);
 
+  const setBridgeQuestion = useCallback((text: string) => {
+    pendingBridgeRef.current = toolNarrationInternals.isBridgeQuestion(text);
+  }, []);
+
   const resetTurn = useCallback(() => {
     narratedRef.current        = new Set();
     saidAgainThisTurnRef.current = false;
     toolNarrationCountRef.current = 0;
+    fileNarrationCountRef.current = 0;
     previousFamilyRef.current  = null;
     hadNarrationsRef.current   = false;
     hadUnskippableRef.current  = false;
     unskippableCountRef.current = 0;
+    pendingBridgeRef.current   = false;
   }, []);
 
-  return { narrate, stop, drain, evictSkippable, enqueueGreeting, queueRef, audioRef, hadNarrationsRef, hadUnskippableRef, unskippableCountRef, onEmptyRef, resetTurn };
+  return { narrate, stop, drain, evictSkippable, resolveApprovalNarration, enqueueGreeting, setBridgeQuestion, queueRef, audioRef, hadNarrationsRef, hadUnskippableRef, unskippableCountRef, onEmptyRef, resetTurn };
 }

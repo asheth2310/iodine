@@ -128,6 +128,7 @@ The service runs on http://localhost:8000. If it isn't running, the Coding Assis
 ### Other Scripts
 
 ```bash
+npm test           # Run the test suite
 npm run build      # Build both client and server for production
 npm run typecheck  # Run TypeScript type checks across the monorepo
 ```

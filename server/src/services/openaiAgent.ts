@@ -96,8 +96,8 @@ export async function runOpenAIAgentLoop(
       if (abortSignal.aborted) return;
       let input: Record<string, unknown> = {};
       try { input = JSON.parse(tc.args); } catch { /* malformed args */ }
-      writeSSE(res, 'tool_call', { id: tc.id, name: tc.name, input });
-      const result = await executeAgentTool(tc.name, input, res, abortSignal);
+      writeSSE(res, 'tool_call', { id: tc.id, name: tc.name, input, approval_id: tc.name === 'run_terminal_command' ? tc.id : undefined });
+      const result = await executeAgentTool(tc.name, input, res, abortSignal, tc.id);
       writeSSE(res, 'tool_result', { tool_use_id: tc.id, name: tc.name, preview: result.preview, error: result.error });
       history.push({ role: 'tool', tool_call_id: tc.id, content: result.content });
     }

@@ -330,6 +330,20 @@ The system prompt lives in **one place** — `systemPrompt.ts`'s `buildSystemPro
 - `old_string not found` → model re-reads the file and retries with exact text
 - `old_string matches N locations` → model adds more surrounding lines to make the match unique
 
+#### Reverting Agent Edits
+
+Successful `write_file` and `edit_file` tool blocks show a **Revert** button in their expanded panel, which puts the file back to its contents from before that edit.
+
+| File | Role |
+|------|------|
+| `server/src/services/editSnapshots.ts` | `saveSnapshot` records the file before an edit to `~/.iodine/<workspace-md5>/edits/<toolCallId>.json`; `revertEdit` restores it and returns a discriminated `not-found` / `stale` / `reverted` / `deleted` result. |
+| `server/src/services/fileTools.ts` | `executeTool` takes an optional `toolCallId` and snapshots immediately before `writeFileContent` in both write paths. `agentTools.ts` passes the id through. |
+| `server/src/routes/agent.ts` | `POST /api/agent/revert` with `{ toolCallId, force? }` maps the service result to a status code and nothing else. |
+| `client/src/components/right/RevertButton.tsx` | Owns the idle → reverting → stale → reverted states. A `stale` result swaps the button for an inline callout naming the file, offering **Revert anyway** (retries with `force`) and **Cancel**. |
+| `client/src/components/right/CodingAssistant.tsx` | `ToolBlock` renders the button; `handleEditReverted` refreshes the file tree and enqueues an `edit_reverted` event context so the model stops assuming the edit is applied. |
+
+**Key details:** snapshots are keyed by tool call id, which the client already holds as `block.id`, so `ToolResult` and the three provider agents are untouched. `existed: false` marks a file the agent created, so reverting deletes it rather than writing an empty file. `afterHash` is the file right after the edit — if it no longer matches, something else changed the file and the revert asks before overwriting. A snapshot is consumed on success, making revert one-shot. The button sits in the expanded panel because the collapsed row is itself a `<button>`. Files touched by `run_terminal_command` are not snapshotted.
+
 #### Tutor Mode
 
 The **Tutor** toggle in the Coding Assistant (left of the Send button) switches the AI into a read-only guidance mode: it walks through the codebase, points to relevant lines, and tells the user what to change without writing any code itself.
@@ -453,7 +467,20 @@ activeFilePath changes (editor tab switch)
 
 **Key design decisions:**
 - **Two-step select+focus:** `selectByPath` (no DOM reads, safe while SVG is `display:none`) + `focusSelected` (reads live `clientWidth`/`clientHeight` after `flushSync` makes the tab visible). Avoids the zero-dimension bug from panning a hidden SVG.
+
 - `activeSystemNode` flows through component props so the chip appears without touching the message history.
+
+#### System View — Inline Coding Assistant Graph
+
+`RightPanel` owns the current workspace graph through `useSystemGraph` and supplies it to both `SystemView` and `CodingAssistant`. Iogram edits and generated graphs therefore appear in the compact chat graph immediately, without a second fetch or persisted copy.
+
+| File | Role |
+|------|------|
+| `client/src/components/right/SystemGraphCanvas.tsx` | Shared SVG renderer. Iogram uses editable mode; chat uses read-only pan, zoom, and selection. |
+| `client/src/components/right/InlineSystemGraph.tsx` | Persistent card above the Coding Assistant composer. It exposes selected-item file references and **Open Iogram**. |
+| `client/src/components/layout/RightPanel.tsx` | Owns shared graph state and passes it to both consumers. |
+
+The inline card is not stored as a conversation message. It is for architecture inspection and source navigation only; generation, save, JSON editing, auto-layout, and node dragging stay in Iogram.
 
 #### System View — Auto-open on AI Summary
 
